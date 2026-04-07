@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <title>Smart Label Maker with QR</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/qrcodejs/1.0.0/qrcode.min.js"></script>
+    <link href="https://fonts.googleapis.com/css2?family=Dancing+Script&family=Poppins:wght@400;700&family=Roboto&display=swap" rel="stylesheet">
+    
+    <style>
+        body { font-family: 'Poppins', sans-serif; padding: 20px; background: #f0f2f5; }
+        h1 { text-align: center; color: #1a1a1a; }
+        .controls { 
+            display: flex; flex-wrap: wrap; gap: 10px; justify-content: center; 
+            margin-bottom: 25px; background: white; padding: 20px; border-radius: 12px; 
+            box-shadow: 0 2px 10px rgba(0,0,0,0.05); position: sticky; top: 10px; z-index: 100;
+        }
+        button, select { padding: 10px 15px; border: none; background: #007bff; color: white; border-radius: 8px; cursor: pointer; font-weight: 500; }
+        button:hover { background: #0056b3; }
+        .textarea-container { display: flex; flex-wrap: wrap; gap: 20px; justify-content: center; }
+        
+        .textarea-box { 
+            width: 350px; background: white; border-radius: 12px; padding: 15px; 
+            position: relative; box-shadow: 0 4px 6px rgba(0,0,0,0.07); border: 1px solid #ddd; 
+        }
+        .order-id-input {
+            width: 100%; margin-top: 35px; margin-bottom: 10px; padding: 8px;
+            border: 1px solid #ccc; border-radius: 4px; font-weight: bold;
+        }
+        .editable { 
+            width: 100%; min-height: 100px; border: 1px solid #eee; 
+            padding: 10px; border-radius: 6px; font-size: 16px; outline: none; box-sizing: border-box;
+        }
+        .lock-btn { position: absolute; top: 12px; right: 45px; background: #6c757d; font-size: 11px; padding: 4px 8px; }
+        .del-btn { position: absolute; top: 12px; right: 10px; background: #ff4d4d; font-size: 11px; padding: 4px 8px; }
+        .kdo-label { position: absolute; top: 10px; left: 15px; font-family: 'Dancing Script', cursive; font-size: 18px; border: 1px dashed #ccc; padding: 2px 8px; border-radius: 4px; cursor: pointer; }
+        
+        /* QR Preview in UI */
+        .qr-preview { margin-top: 10px; display: flex; justify-content: center; background: #f9f9f9; padding: 5px; border-radius: 5px; }
+        .locked .editable, .locked .order-id-input { background: #f8f9fa; cursor: not-allowed; }
+    </style>
+</head>
+<body>
+
+    <h1>Smart Label Maker</h1>
+    
+    <div class="controls">
+        <button onclick="addAddressBox()">+ Add New Label</button>
+        <select id="fontFamily" onchange="adjustFontFamily()">
+            <option value="Poppins">Poppins</option>
+            <option value="Roboto">Roboto</option>
+            <option value="Courier New">Courier (Mono)</option>
+        </select>
+        <select id="pageSize">
+            <option value="A6" selected>A6 Size</option>
+            <option value="A5">A5 Size</option>
+            <option value="A4">A4 Size</option>
+        </select>
+        <button onclick="adjustFontSize(2)">A+</button>
+        <button onclick="adjustFontSize(-2)">A–</button>
+        <button onclick="printAddresses()" style="background:#28a745;">Print Labels with QR</button>
+    </div>
+
+    <div id="addressContainer" class="textarea-container"></div>
+
+    <div id="qr-buffer" style="display:none;"></div>
+
+<script>
+    function addAddressBox() {
+        const container = document.getElementById('addressContainer');
+        const box = document.createElement('div');
+        box.className = 'textarea-box';
+        // Unique ID for each box to handle individual QR generation
+        const boxId = 'box-' + Date.now();
+        box.id = boxId;
+
+        box.innerHTML = `
+            <button class="kdo-label" onclick="toggleKdo(this)">KDO</button>
+            <button class="lock-btn" onclick="toggleLock(this)">Lock</button>
+            <button class="del-btn" onclick="this.parentElement.remove()">X</button>
+            <input type="text" class="order-id-input" placeholder="Order ID (e.g. #12345)">
+            <div class="editable" contenteditable="true" placeholder="Enter Address Here..."></div>
+            <div class="qr-preview">QR will generate on Print</div>
+        `;
+        container.appendChild(box);
+        adjustFontFamily();
+    }
+
+    function toggleLock(btn) {
+        const box = btn.parentElement;
+        const editable = box.querySelector('.editable');
+        const input = box.querySelector('.order-id-input');
+        const isLocked = editable.contentEditable === "false";
+        editable.contentEditable = !isLocked;
+        input.disabled = !isLocked;
+        box.classList.toggle('locked');
+        btn.textContent = isLocked ? "Lock" : "Unlock";
+    }
+
+    function toggleKdo(labelBtn) {
+        labelBtn.textContent = labelBtn.textContent === 'KDO' ? 'KZO' : 'KDO';
+    }
+
+    function adjustFontFamily() {
+        const font = document.getElementById('fontFamily').value;
+        document.querySelectorAll('.editable').forEach(div => div.style.fontFamily = font);
+    }
+
+    function adjustFontSize(change) {
+        document.querySelectorAll('.editable').forEach(div => {
+            const currentSize = parseInt(window.getComputedStyle(div).fontSize);
+            div.style.fontSize = (currentSize + change) + 'px';
+        });
+    }
+
+    async function printAddresses() {
+        const boxes = document.querySelectorAll('.textarea-box');
+        if (boxes.length === 0) return alert("Add a label first!");
+
+        const fontName = document.getElementById('fontFamily').value;
+        const pageSize = document.getElementById('pageSize').value;
+        const win = window.open('', '', 'width=900,height=800');
+
+        win.document.write(`
+            <html>
+            <head>
+                <style>
+                    @import url('https://fonts.googleapis.com/css2?family=Dancing+Script&family=${fontName.replace(' ', '+')}:wght@400;700&display=swap');
+                    @page { size: ${pageSize} portrait; margin: 0; }
+                    body { margin: 0; padding: 0; font-family: "${fontName}", sans-serif; }
+                    .page { 
+                        page-break-after: always; position: relative; 
+                        width: 100%; height: 99vh; padding: 30px; box-sizing: border-box;
+                    }
+                    .label-top { display: flex; justify-content: space-between; align-items: flex-start; margin-bottom: 20px; }
+                    .kdo { font-family: 'Dancing Script', cursive; font-size: 24px; }
+                    .qr-code img { width: 100px; height: 100px; }
+                    .order-id { font-weight: bold; font-size: 18px; margin-bottom: 10px; color: #555; }
+                    .content { font-size: 18px; line-height: 1.4; }
+                    .footer { position: absolute; bottom: 30px; width: calc(100% - 60px); text-align: center; font-size: 12px; font-weight: bold; border-top: 1px solid #eee; padding-top: 10px; }
+                </style>
+            </head>
+            <body>
+        `);
+
+        for (let box of boxes) {
+            const orderId = box.querySelector('.order-id-input').value || "No Order ID";
+            const address = box.querySelector('.editable').innerText;
+            const kdo = box.querySelector('.kdo-label').textContent;
+            const currentFontSize = window.getComputedStyle(box.querySelector('.editable')).fontSize;
+
+            if (address.trim() === "") continue;
+
+            // Generate QR Code Data URL
+            const qrData = `Order: ${orderId}\nAddress: ${address}`;
+            const qrBase64 = await generateQRBase64(qrData);
+
+            win.document.write(`
+                <div class="page">
+                    <div class="label-top">
+                        <div class="kdo">${kdo}</div>
+                        <div class="qr-code"><img src="${qrBase64}"></div>
+                    </div>
+                    <div class="order-id">ID: ${orderId}</div>
+                    <div class="content" style="font-size: ${currentFontSize}">${address.replace(/\n/g, '<br>')}</div>
+                    <div class="footer">⚠️ Important: Unboxing video required for any claim.</div>
+                </div>
+            `);
+        }
+
+        win.document.write(`</body></html>`);
+        win.document.close();
+        
+        // Wait for images to load before printing
+        setTimeout(() => { win.print(); }, 1000);
+    }
+
+    // Helper to generate QR as Base64 Image
+    function generateQRBase64(text) {
+        return new Promise((resolve) => {
+            const buffer = document.getElementById('qr-buffer');
+            buffer.innerHTML = '';
+            const qrcode = new QRCode(buffer, {
+                text: text,
+                width: 128,
+                height: 128,
+                correctLevel: QRCode.CorrectLevel.H
+            });
+            // QRCode.js takes a moment to render the canvas/img
+            setTimeout(() => {
+                const img = buffer.querySelector('img');
+                resolve(img ? img.src : '');
+            }, 100);
+        });
+    }
+
+    // Initialize with one box
+    addAddressBox();
+</script>
+</body>
+</html>
